@@ -1,0 +1,244 @@
+import dash
+import pickle
+from dash import dcc, html
+from dash.dependencies import Input, Output, State
+import plotly.graph_objs as go
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler as scaler
+from sklearn.impute import SimpleImputer
+import numpy as np
+from google.cloud import bigquery
+
+# Initialisation de l'application Dash
+app = dash.Dash(__name__, suppress_callback_exceptions=True)
+
+# Connexion à BigQuery
+client = bigquery.Client(project='cdiscountwagon')
+
+# Fonction pour charger les données depuis BigQuery
+def load_data():
+    query = """
+    SELECT *
+    FROM `cdiscountwagon.Datasets.Merges_Sales_avec_categ`
+    """
+    df = client.query(query).to_dataframe()
+    return df
+
+# Chargement des données
+df = load_data()
+
+# Préparation des données pour le modèle
+X = df[['avg_price', 'indice_avg_price', 'impression_gs', 'acquisition_cost_gs', 'click_on_front', 'on_operation']]
+y = df['nb_new_customers']
+
+# Imputation des valeurs manquantes
+imputer = SimpleImputer(strategy='mean')
+X_imputed = imputer.fit_transform(X)
+
+# Division des données en ensembles d'entraînement et de test
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.2, random_state=42)
+
+with open('data/fitted_model/fitted_model_rg.pickle','rb') as modelFile:
+     model = pickle.load(modelFile)
+
+# Liste des product_id pour le dropdown
+product_id_list = df['product_id'].unique()
+product_id_options = [{'label': str(id), 'value': str(id)} for id in product_id_list]
+
+app.layout = html.Div([
+    # Header
+    html.Div([
+        html.H1("Dashboard de Prédiction E-commerce", className="dashboard-title"),
+    ], className="header"),
+    
+    # Conteneur principal
+    html.Div([
+    
+    # Sidebar
+        html.Div([
+        html.H2("Filtres", className="sidebar-title"),
+    
+    # Dropdown pour sélectionner l'ID du produit
+        html.Label("ID du Produit"),
+        dcc.Dropdown(
+        id="product-id-input",
+        options=product_id_options,
+        placeholder="Entrez l'ID du produit",
+        searchable=True,
+        clearable=True,
+        className="input-box"
+    ),
+    
+    # Champ affichant automatiquement la catégorie après sélection du produit
+        html.Br(),
+            html.Label("Catégorie"),
+            html.Div(id="category-output", className="output-box"),
+
+    # Champ pour afficher le prix moyen (avg_price)
+        html.Br(),
+        html.Label("Prix Moyen"),
+        html.Div(id="avg-price-output", className="output-box"),
+
+    # Champ pour afficher l'indice du prix moyen (indice_avg_price)
+        html.Br(),
+        html.Label("Indice Prix Moyen"),
+        html.Div(id="indice-avg-price-output", className="output-box"),
+
+    # Slider pour sélectionner les impressions (impression_gs)
+        html.Br(),
+        html.Label("Impressions"),
+        dcc.Slider(
+        id='impression-gs-slider',
+        min=0,
+        max=df['impression_gs'].max(),
+        step=10000,
+        tooltip={"placement": "bottom", "always_visible": True},
+        marks=None,
+        value=10000,
+        className="slider"
+    ),
+        html.Div(id="impression-gs-output", className="output-box"),
+
+    # Champ pour afficher si le produit est en page d'accueil (on_front)
+        html.Br(),
+        html.Label("En Page d'Accueil"),
+        html.Div(id="click-on-front-output", className="output-box"),
+
+    # Sélection de la date de lancement de l'opération (calendrier)
+        html.Br(),
+        html.Label("Date de Lancement de l'Opération"),
+        dcc.DatePickerSingle(
+        id='launch-date-picker',
+        placeholder='Sélectionnez une date',
+        display_format='DD/MM/YYYY',
+        className="input-box"
+    ),
+    
+    # Bouton pour prédire
+        html.Br(),
+        html.Button("Prédire", id="predict-button", n_clicks=0, className="predict-button"),
+        ], className="sidebar"),
+
+        
+        # Contenu principal
+        html.Div([
+            html.Div([
+                html.H2("Prévisions de Performance", className="section-title"),
+                html.Div([
+                    html.Div([
+                        html.H3("En Opération Commerciale"),
+                        html.Div(id="prediction-op", className="prediction-value"),
+                    ], className="prediction-box"),
+                    html.Div([
+                        html.H3("Hors Opération Commerciale"),
+                        html.Div(id="prediction-no-op", className="prediction-value"),
+                    ], className="prediction-box"),
+                ], className="predictions-container"),
+            ], className="main-section"),
+            
+            html.Div([
+                html.H2("Historique des Campagnes", className="section-title"),
+                html.Div(id="campaign-history", className="campaign-history"),
+            ], className="main-section"),
+            
+            html.Div([
+                html.H2("Graphique de Performance", className="section-title"),
+                dcc.Graph(id="performance-graph"),
+            ], className="main-section"),
+        ], className="dashboard-content"),
+    ], className="main-container"),
+])
+
+# Callback pour la prédiction et l'affichage des résultats
+@app.callback(
+    [Output("prediction-op", "children"),
+     Output("prediction-no-op", "children"),
+     Output("campaign-history", "children"),
+     Output("performance-graph", "figure")],
+    [Input("predict-button", "n_clicks")],
+    [State("product-id-input", "value")]
+)
+def update_output(n_clicks, product_id):
+    if n_clicks > 0 and product_id:
+        # Récupération des données du produit
+        product_data = df[df['product_id'] == product_id].iloc[-1]
+        '''
+        # Prédiction avec opération commerciale
+        input_op = scaler().transform([[
+            product_data['avg_price'],
+            product_data['indice_avg_price'],
+            product_data['impression_gs'],
+            product_data['acquisition_cost_gs'],
+            product_data['click_on_front'],
+            1
+        ]])
+        '''
+        #prediction_op = model.predict(input_op)[0]
+        prediction_op = model.predict(X_test)[0]
+        
+        # Prédiction sans opération commerciale
+        '''
+        input_no_op = scaler().transform([[
+            product_data['avg_price'],
+            product_data['indice_avg_price'],
+            product_data['impression_gs'],
+            product_data['acquisition_cost_gs'],
+            product_data['click_on_front'],
+            0
+        ]])
+        '''
+        #prediction_no_op = model.predict(input_no_op)[0]
+        prediction_no_op = model.predict(X_test)[0]        
+        
+        # Historique des campagnes
+        campaigns = df[(df['product_id'] == product_id) & (df['on_operation'] == 1)][['operation_name', 'startdate_op', 'enddate_op']].drop_duplicates()
+        campaign_history = [
+            html.Div([
+                html.Strong(row['operation_name']),
+                html.Span(f" ({row['startdate_op']} - {row['enddate_op']})"),
+            ], className="campaign-item")
+            for _, row in campaigns.iterrows()
+        ]
+        
+        # Graphique de performance
+        performance_data = df[df['product_id'] == product_id]
+        fig = go.Figure()
+
+        # Ajout des barres pour les nouveaux clients
+        fig.add_trace(go.Bar(
+        x=performance_data['order_date'], 
+        y=performance_data['nb_new_customers'],
+        name='Nouveaux clients',
+        marker_color='blue'
+        ))
+
+        # Ajout des barres pour les clients totaux
+        fig.add_trace(go.Bar(
+        x=performance_data['order_date'], 
+        y=performance_data['total_customers'],
+        name='Clients totaux',
+        marker_color='green'
+        ))
+
+        #Point de la prédiction de nouveaux clients
+
+        # Mise en page du graphique
+        fig.update_layout(
+        barmode='group',  # Les barres pour chaque période sont groupées ensemble
+        title='Performance du produit au fil du temps',
+        xaxis_title='Date',
+        yaxis_title='Nombre de clients',
+        xaxis_tickformat='%d<br>%B',
+        legend_title_text='Type de clients',
+        margin=dict(l=40, r=20, t=40, b=20),  # Marges du graphique
+        height=400  # Hauteur du graphique
+        )
+        
+        return f"{prediction_op:.2f} nouveaux clients", f"{prediction_no_op:.2f} nouveaux clients", campaign_history, fig
+    
+    return "En attente...", "En attente...", "Aucun historique disponible", {}
+
+if __name__ == '__main__':
+    app.run_server(debug=True, port=8080, host='0.0.0.0')

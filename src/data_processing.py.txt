@@ -1,0 +1,27 @@
+import pandas as pd
+import joblib
+from cachetools import cached, TTLCache
+
+# Cache les résultats de chargement de données pour 10 minutes
+cache = TTLCache(maxsize=100, ttl=600)
+
+@cached(cache)
+def load_data():
+    # Hypothétique chargement depuis BigQuery
+    df = pd.read_gbq('SELECT * FROM `cdiscountwagon.Datasets.Merges_Sales_avec_categ`')
+    return df
+
+def prepare_model_inputs(product_id):
+    df = load_data()
+    
+    # Transformation et préparation des données
+    data = df[df['product_id'] == product_id].copy()
+    
+    model = joblib.load('data/fitted_model/fitted_model_rg.pickle')  # Charger le modèle
+    
+    return data, model, df
+
+def get_product_id_options():
+    df = load_data()
+    product_ids = df['product_id'].unique()
+    return [{'label': pid, 'value': pid} for pid in product_ids]

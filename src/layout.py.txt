@@ -1,0 +1,84 @@
+from dash import dcc, html
+from data_processing import get_product_id_options
+
+# Charger les options pour le dropdown (tu pourrais aussi mettre cela en cache si nécessaire)
+product_id_options = get_product_id_options()
+
+# Layout de l'application
+layout = html.Div([
+    html.Div([
+        html.H1("Dashboard de Prédiction E-commerce", className="dashboard-title"),
+    ], className="header"),
+
+    html.Div([
+        html.Div([
+            html.H2("Filtres", className="sidebar-title"),
+            html.Label("ID du Produit"),
+            dcc.Dropdown(
+                id="product-id-input",
+                options=product_id_options,
+                placeholder="Entrez l'ID du produit",
+                searchable=True,
+                clearable=True,
+                className="input-box"
+            ),
+            html.Br(),
+            html.Label("Catégorie"),
+            html.Div(id="category-output", className="output-box"),
+            html.Br(),
+            html.Label("Prix Moyen"),
+            html.Div(id="avg-price-output", className="output-box"),
+            html.Br(),
+            html.Label("Indice Prix Moyen"),
+            html.Div(id="indice-avg-price-output", className="output-box"),
+            html.Br(),
+            html.Label("Impressions"),
+            dcc.Slider(
+                id='impression-gs-slider',
+                min=0,
+                max=100000,  # Tu pourrais aussi utiliser des valeurs dynamiques
+                step=10000,
+                value=10000,
+                className="slider"
+            ),
+            html.Div(id="impression-gs-output", className="output-box"),
+            html.Br(),
+            html.Label("En Page d'Accueil"),
+            html.Div(id="click-on-front-output", className="output-box"),
+            html.Br(),
+            html.Label("Date de Lancement de l'Opération"),
+            dcc.DatePickerSingle(
+                id='launch-date-picker',
+                placeholder='Sélectionnez une date',
+                display_format='DD/MM/YYYY',
+                className="input-box"
+            ),
+            html.Br(),
+            html.Button("Prédire", id="predict-button", n_clicks=0, className="predict-button"),
+        ], className="sidebar"),
+
+        html.Div([
+            html.Div([
+                html.H2("Prévisions de Performance", className="section-title"),
+                html.Div([
+                    html.Div([
+                        html.H3("En Opération Commerciale"),
+                        html.Div(id="prediction-op", className="prediction-value"),
+                    ], className="prediction-box"),
+                    html.Div([
+                        html.H3("Hors Opération Commerciale"),
+                        html.Div(id="prediction-no-op", className="prediction-value"),
+                    ], className="prediction-box"),
+                ], className="predictions-container"),
+            ], className="main-section"),
+            html.Div([
+                html.H2("Historique des Campagnes", className="section-title"),
+                html.Div(id="campaign-history", className="campaign-history"),
+            ], className="main-section"),
+            html.Div([
+                html.H2("Graphique de Performance", className="section-title"),
+                dcc.Graph(id="performance-graph"),
+            ], className="main-section"),
+        ], className="dashboard-content"),
+    ], className="main-container"),
+])
